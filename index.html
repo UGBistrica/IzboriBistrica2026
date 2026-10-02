@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="bs">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>EVIDENCIJA BISTRICA 2026</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f3f7f4;color:#1f2937}
+header{background:#198754;color:#fff;padding:18px 24px;font-size:24px;font-weight:700}nav{display:flex;background:#fff;border-bottom:1px solid #d8e2dc;position:sticky;top:0;z-index:5}
+nav button{flex:1;padding:16px;border:0;background:#fff;color:#374151;font-size:16px;font-weight:700;cursor:pointer}nav button.active{color:#198754;border-bottom:4px solid #198754}
+main{max-width:1200px;margin:22px auto;padding:0 14px}.tab{display:none}.tab.active{display:block}.toolbar{display:flex;gap:10px;margin-bottom:12px;align-items:center}
+.toolbar input{flex:1;padding:12px;border:1px solid #cbd5d1;border-radius:8px;font-size:16px}.count{font-weight:700;color:#198754;white-space:nowrap}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 8px #0001;overflow:hidden}.table-head,.row{display:grid;grid-template-columns:70px 1.5fr 1.2fr 1.2fr 125px 110px;gap:10px;align-items:center}
+.table-head{background:#e8f5ee;font-weight:700;padding:12px 14px;color:#166534}.row{padding:10px 14px;border-bottom:1px solid #edf1ee}.cell{min-width:0;overflow-wrap:anywhere}
+.action{border:0;border-radius:7px;padding:9px 11px;font-weight:700;cursor:pointer;background:#198754;color:#fff}.back{background:#6c757d}.action:disabled{opacity:.55;cursor:wait}.empty{padding:25px;text-align:center;color:#6b7280}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}.stat{background:#fff;border-radius:12px;padding:22px;text-align:center;box-shadow:0 2px 8px #0001}.stat .num{font-size:36px;font-weight:800;color:#198754;margin-top:8px}
+.percent{margin-top:18px;background:#fff;padding:22px;border-radius:12px;box-shadow:0 2px 8px #0001}.percent .big{font-size:36px;font-weight:800;color:#198754;margin-top:8px}.bar{height:25px;background:#e5ebe7;border-radius:13px;overflow:hidden;margin-top:12px}.fill{height:100%;background:#198754;width:0%;transition:.25s}.note{margin-top:14px;font-size:13px;color:#6b7280}
+@media(max-width:850px){.table-head{display:none}.row{grid-template-columns:55px 1fr 1fr;gap:7px;padding:12px}.row .dob{grid-column:2}.row .action-cell{grid-column:3;grid-row:1 / span 2;align-self:center}.row .parent::before{content:"Otac/roditelj: ";font-weight:700;color:#6b7280}.row .dob::before{content:"Datum: ";font-weight:700;color:#6b7280}.stats{grid-template-columns:1fr}}
+</style></head><body>
+<header>EVIDENCIJA BISTRICA 2026</header>
+<nav><button class="active" onclick="showTab('treba',this)">TREBA GLASATI</button><button onclick="showTab('glasao',this)">GLASAO</button><button onclick="showTab('stat',this)">STATISTIKA</button></nav>
+<main>
+<section id="treba" class="tab active"><div class="toolbar"><input id="searchTreba" placeholder="Pretraži prezime, ime, ime oca ili RBR..."><span class="count" id="countTreba"></span></div><div class="card"><div class="table-head"><div>RBR</div><div>PREZIME</div><div>IME OCA</div><div>IME</div><div>DATUM ROĐENJA</div><div></div></div><div id="trebaList"></div></div></section>
+<section id="glasao" class="tab"><div class="toolbar"><input id="searchGlasao" placeholder="Pretraži prezime, ime, ime oca ili RBR..."><span class="count" id="countGlasao"></span></div><div class="card"><div class="table-head"><div>RBR</div><div>PREZIME</div><div>IME OCA</div><div>IME</div><div>DATUM ROĐENJA</div><div></div></div><div id="glasaoList"></div></div></section>
+<section id="stat" class="tab"><div class="stats"><div class="stat"><div>UKUPNO</div><div class="num" id="total">0</div></div><div class="stat"><div>GLASAO</div><div class="num" id="voted">0</div></div><div class="stat"><div>TREBA GLASATI</div><div class="num" id="notVoted">0</div></div></div><div class="percent"><b>PROCENAT GLASALIH</b><div class="big" id="pct">0%</div><div class="bar"><div class="fill" id="fill"></div></div></div><div class="note" id="note">Povezivanje sa bazom...</div></section>
+</main>
+<script>
+const URL='https://efkyvqdefbkkelpyupmv.supabase.co';
+const KEY='sb_publishable_MPaRq8SsEDugqA4sFjNMWw_h9IYVxHM';
+let people=[],loading=true,errorMessage='',busy=false;
+const headers={'apikey':KEY,'Authorization':'Bearer '+KEY,'Content-Type':'application/json'};
+
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));}
+function fmtDate(v){if(!v)return '';let a=String(v).split('-');return a.length===3?a[2]+'.'+a[1]+'.'+a[0]:v;}
+function normalize(p){return {id:p.id,rbr:Number(p.rbr),surname:p.prezime||'',parent:p.ime_oca||'',name:p.ime||'',dob:fmtDate(p.datum_rodjenja),voted:p.glasao===true};}
+
+async function api(path,options={}){
+  const r=await fetch(URL+'/rest/v1/'+path,{...options,headers:{...headers,...(options.headers||{})}});
+  const text=await r.text();
+  let data=null; try{data=text?JSON.parse(text):null}catch{}
+  if(!r.ok) throw new Error((data&&data.message)||text||('HTTP '+r.status));
+  return data;
+}
+
+function signature(list){
+  return list.map(p=>p.id+'|'+p.rbr+'|'+p.surname+'|'+p.parent+'|'+p.name+'|'+p.dob+'|'+(p.voted?'1':'0')).join('\n');
+}
+
+async function loadPeople(initial=false){
+  if(initial){loading=true;errorMessage='';render();}
+  try{
+    const data=await api('glasaci?select=id,rbr,prezime,ime_oca,ime,datum_rodjenja,glasao&order=rbr.asc');
+    const next=(data||[]).map(normalize);
+    const changed=signature(next)!==signature(people);
+    people=next;
+    loading=false;
+    errorMessage='';
+    // Only redraw when the data actually changed.
+    if(initial || changed) render();
+  }catch(e){
+    console.error(e);
+    loading=false;
+    if(initial){
+      people=[];
+      errorMessage='Greška pri učitavanju baze: '+e.message;
+      render();
+    }
+  }
+}
+
+async function setVoted(rbr,value){
+  if(busy)return;
+  busy=true;
+  errorMessage='';
+  render();
+  try{
+    await api('glasaci?rbr=eq.'+encodeURIComponent(rbr),{
+      method:'PATCH',
+      body:JSON.stringify({glasao:value}),
+      headers:{'Prefer':'return=minimal'}
+    });
+  }catch(e){
+    console.error(e);
+    errorMessage='Greška pri spremanju: '+e.message;
+  }
+  busy=false;
+  await loadPeople(false);
+  if(errorMessage) render();
+}
+
+function matches(p,q){
+  if(!q)return true;
+  return [p.rbr,p.surname,p.parent,p.name,p.dob].join(' ').toLocaleLowerCase('bs-BA').includes(q);
+}
+
+function row(p,voted){
+  return '<div class="row"><div class="cell"><b>'+p.rbr+'</b></div><div class="cell">'+esc(p.surname)+'</div><div class="cell parent">'+esc(p.parent)+'</div><div class="cell">'+esc(p.name)+'</div><div class="cell dob">'+esc(p.dob)+'</div><div class="cell action-cell"><button class="action '+(voted?'back':'')+'" '+(busy?'disabled':'')+' onclick="setVoted('+p.rbr+','+(voted?'false':'true')+')">'+(voted?'VRATI':'GLASAO')+'</button></div></div>';
+}
+
+function showTab(id,btn){
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+function render(){
+  const qn=(document.getElementById('searchTreba')?.value||'').trim().toLocaleLowerCase('bs-BA');
+  const qg=(document.getElementById('searchGlasao')?.value||'').trim().toLocaleLowerCase('bs-BA');
+  const total=people.length,voted=people.filter(p=>p.voted).length,not=total-voted;
+  const n=people.filter(p=>!p.voted&&matches(p,qn)),g=people.filter(p=>p.voted&&matches(p,qg));
+  let nl=document.getElementById('trebaList'),gl=document.getElementById('glasaoList');
+  if(loading){
+    nl.innerHTML='<div class="empty">Učitavanje podataka...</div>';
+    gl.innerHTML='<div class="empty">Učitavanje podataka...</div>';
+  }else if(errorMessage){
+    nl.innerHTML='<div class="empty">'+esc(errorMessage)+'</div>';
+    gl.innerHTML='<div class="empty">'+esc(errorMessage)+'</div>';
+  }else{
+    nl.innerHTML=n.length?n.map(p=>row(p,false)).join(''):'<div class="empty">Nema pronađenih osoba.</div>';
+    gl.innerHTML=g.length?g.map(p=>row(p,true)).join(''):'<div class="empty">Nema označenih osoba.</div>';
+  }
+  document.getElementById('countTreba').textContent='Prikazano: '+n.length+' / '+not;
+  document.getElementById('countGlasao').textContent='Prikazano: '+g.length+' / '+voted;
+  document.getElementById('total').textContent=total;
+  document.getElementById('voted').textContent=voted;
+  document.getElementById('notVoted').textContent=not;
+  const pct=total?voted/total*100:0;
+  document.getElementById('pct').textContent=pct.toFixed(1)+'%';
+  document.getElementById('fill').style.width=pct+'%';
+  document.getElementById('note').textContent=loading?'Povezivanje sa zajedničkom Supabase bazom...':(errorMessage||'Podaci se čuvaju u zajedničkoj Supabase bazi.');
+}
+
+document.getElementById('searchTreba').addEventListener('input',render);
+document.getElementById('searchGlasao').addEventListener('input',render);
+
+loadPeople(true);
+
+// Provjera baze svakih 5 sekundi, ali bez ponovnog crtanja ako nema promjene.
+setInterval(()=>{if(!busy&&!document.hidden)loadPeople(false);},5000);
+</script></body></html>
